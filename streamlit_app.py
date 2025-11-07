@@ -13,10 +13,10 @@ with st.expander('Data'):
 
 
  st.write('**X**')
-  X_raw = df.drop('Delivery by caesarean section', axis=19)
+  X_raw = df.drop('Delivery_by_caesarean_section', axis=19)
   X_raw
 
   st.write('**y**')
-  y_raw = df.'Delivery by caesarean section'
+  y_raw = df.'Delivery_by_caesarean_section'
   y_raw
 
