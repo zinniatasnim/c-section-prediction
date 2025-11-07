@@ -21,5 +21,5 @@ with st.expander('Data'):
   y_raw
 
 with st.expander('Data visualization'):
-  st.scatter_chart(data=df, x='Respondent's_current_age', y='Body_Mass_Index', color='delivery')
+  st.scatter_chart(data=df, x='', y='Body_Mass_Index', color='delivery')
 
