@@ -5,5 +5,9 @@ st.title('C-section Prediction App')
 
 st.info('This is an app to run machine learning model.')
 
-df = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned.csv")
-df
+
+with st.expander('Data'):
+  st.write('**Raw data**')
+  df = pd.read_csv('https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned.csv')
+  df
+
