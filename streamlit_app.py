@@ -12,9 +12,9 @@ with st.expander('Data'):
   df
 
   
-  st.write('**x**')
-  x_raw = df.drop('delivery', axis=19)
-  x_raw
+  st.write('**X**')
+  X_raw = df.drop('delivery', axis=1)
+  X_raw
 
   st.write('**y**')
   y_raw = df.delivery
