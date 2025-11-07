@@ -17,6 +17,6 @@ with st.expander('Data'):
   x_raw
 
   st.write('**y**')
-  y_raw = df.'delivery'
+  y_raw = df.delivery
   y_raw
 
