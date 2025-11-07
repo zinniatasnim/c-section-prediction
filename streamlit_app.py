@@ -11,10 +11,10 @@ with st.expander('Data'):
   df = pd.read_csv('https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned.csv')
   df
 
-
- st.write('**X**')
-  X_raw = df.drop('delivery', axis=19)
-  X_raw
+  
+  st.write('**x**')
+  x_raw = df.drop('delivery', axis=19)
+  x_raw
 
   st.write('**y**')
   y_raw = df.'delivery'
