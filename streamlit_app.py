@@ -25,7 +25,7 @@ def load_data():
     return df
 
 # ==========================
-# Train model (cached) - FIXED VERSION
+# Train model (cached) - ENHANCED VERSION
 # ==========================
 @st.cache_resource
 def train_model():
@@ -37,16 +37,48 @@ def train_model():
     X = df.drop(columns=[target_col])
     y = df[target_col].astype(int)
     
+    # CREATE REALISTIC RISK FEATURES - only flag actual high-risk scenarios
+    # High BMI risk: obesity (BMI > 30), not just overweight
+    X['obesity_risk'] = (X["Body Mass Index"] > 30).astype(int)
+    
+    # Advanced maternal age: clinical threshold is 35+
+    X['advanced_maternal_age'] = (X["Respondent's current age"] >= 35).astype(int)
+    
+    # Very young first birth risk: < 18 years
+    X['teenage_first_birth'] = (X["Age of respondent at 1st birth"] < 18).astype(int)
+    
+    # Combined high-risk: obesity + advanced age
+    X['compound_risk'] = ((X["Body Mass Index"] > 30) & (X["Respondent's current age"] >= 35)).astype(int)
+    
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    rf = RandomForestClassifier(n_estimators=200, random_state=42, class_weight="balanced")
-    ada = AdaBoostClassifier(n_estimators=150, random_state=42)
-    gb = GradientBoostingClassifier(n_estimators=150, random_state=42)
+    # Enhanced model parameters to capture these features better
+    rf = RandomForestClassifier(
+        n_estimators=200, 
+        max_depth=15, 
+        min_samples_split=5,
+        max_features='sqrt',
+        random_state=42, 
+        class_weight="balanced"
+    )
+    
+    ada = AdaBoostClassifier(
+        n_estimators=150, 
+        learning_rate=0.5, 
+        random_state=42
+    )
+    
+    gb = GradientBoostingClassifier(
+        n_estimators=150, 
+        max_depth=5, 
+        learning_rate=0.1, 
+        random_state=42
+    )
 
     stack_model = StackingClassifier(
         estimators=[('rf', rf), ('ada', ada), ('gb', gb)],
-        final_estimator=LogisticRegression(class_weight="balanced"),
+        final_estimator=LogisticRegression(class_weight="balanced", max_iter=1000),
         cv=5
     )
 
@@ -123,7 +155,14 @@ input_data = {
     "Wealth index combined_2": wealth_2,
     "Wealth index combined_3": wealth_3,
     "Wealth index combined_4": wealth_4,
-    "Wealth index combined_5": wealth_5
+    "Wealth index combined_5": wealth_5,
+    # Add the same interaction features as training
+    "age_bmi_interaction": age * bmi,
+    "age_firstbirth_gap": age - age_first_birth,
+    "bmi_age_ratio": bmi / (age + 1),
+    "high_bmi_flag": 1 if bmi > 25 else 0,
+    "advanced_age_flag": 1 if age > 35 else 0,
+    "young_first_birth": 1 if age_first_birth < 20 else 0
 }
 
 input_df = pd.DataFrame(input_data, index=[0])
