@@ -13,10 +13,10 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 # ==========================
 st.set_page_config(page_title="C-section Prediction", layout="centered")
 st.title("🤰 Caesarean Section Prediction App")
-st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0) and shows feature contributions.")
+st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0) with feature importance explanation.")
 
 # ==========================
-# Load dataset
+# Load dataset (cached)
 # ==========================
 @st.cache_data
 def load_data():
@@ -30,10 +30,10 @@ X = df.drop(columns=[target_col])
 y = df[target_col].astype(int)
 
 # ==========================
-# Train model (cached)
+# Train model once (cached)
 # ==========================
 @st.cache_resource
-def train_model(X, y):
+def train_stacked_model(X, y):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
@@ -48,24 +48,33 @@ def train_model(X, y):
     )
 
     stack_model.fit(X_scaled, y)
-    return stack_model, scaler, rf  # Return RF for feature importance
 
-stack_model, scaler, rf_model = train_model(X, y)
+    # Fit RF separately for feature importance
+    rf.fit(X_scaled, y)
+
+    return stack_model, scaler, rf
+
+stack_model, scaler, rf_model = train_stacked_model(X, y)
 
 # ==========================
-# Evaluation
+# Evaluation (cached)
 # ==========================
-cv_scores = cross_val_score(stack_model, scaler.transform(X), y, cv=5, scoring='accuracy')
-cv_acc = cv_scores.mean()
-X_train, X_test, y_train, y_test = train_test_split(scaler.transform(X), y, test_size=0.2, stratify=y, random_state=42)
-y_pred = stack_model.predict(X_test)
-test_acc = accuracy_score(y_test, y_pred)
+@st.cache_data
+def evaluate_model(stack_model, X_scaled, y):
+    cv_scores = cross_val_score(stack_model, X_scaled, y, cv=5, scoring='accuracy')
+    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, stratify=y, random_state=42)
+    y_pred = stack_model.predict(X_test)
+    test_acc = accuracy_score(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred)
+    return cv_scores.mean(), test_acc, cm
+
+X_scaled_full = scaler.transform(X)
+cv_acc, test_acc, cm = evaluate_model(stack_model, X_scaled_full, y)
 
 st.success(f"📊 CV Accuracy: {cv_acc:.3f}")
 st.success(f"✅ Test Accuracy: {test_acc:.3f}")
 
 st.subheader("Confusion Matrix")
-cm = confusion_matrix(y_test, y_pred)
 st.dataframe(pd.DataFrame(cm, columns=['Pred_Normal', 'Pred_Caesarean'], index=['Actual_Normal', 'Actual_Caesarean']))
 
 # ==========================
@@ -140,14 +149,9 @@ st.write("### Prediction Probabilities")
 st.dataframe(pd.DataFrame([pred_proba], columns=["Normal", "Caesarean"]))
 
 # ==========================
-# Feature Contribution / Risk
+# Feature Importance / Risk
 # ==========================
-st.subheader("⚠️ Feature Contribution / Risk Factors")
+st.subheader("⚠️ Top Contributing Features")
 feature_importances = pd.Series(rf_model.feature_importances_, index=X.columns)
-feature_importances_sorted = feature_importances.sort_values(ascending=False)
-
-# Only show top 5 contributors
-top5 = feature_importances_sorted.head(5)
-st.write("Top contributing features for prediction:")
-for feat, val in top5.items():
-    st.write(f"{feat}: {val:.3f}")
+top5 = feature_importances.sort_values(ascending=False).head(5)
+st.write(top5)
