@@ -24,16 +24,19 @@ def load_data():
     df = df.dropna(subset=["Delivery by caesarean section"])
     return df
 
-df = load_data()
-target_col = "Delivery by caesarean section"
-X = df.drop(columns=[target_col])
-y = df[target_col].astype(int)
-
 # ==========================
-# Train model (cached)
+# Train model (cached) - FIXED VERSION
 # ==========================
 @st.cache_resource
-def train_model(X, y):
+def train_model():
+    # Load data inside the cached function
+    df = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv")
+    df = df.dropna(subset=["Delivery by caesarean section"])
+    
+    target_col = "Delivery by caesarean section"
+    X = df.drop(columns=[target_col])
+    y = df[target_col].astype(int)
+    
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
@@ -48,24 +51,29 @@ def train_model(X, y):
     )
 
     stack_model.fit(X_scaled, y)
-    return stack_model, scaler
+    
+    # Calculate metrics
+    cv_scores = cross_val_score(stack_model, X_scaled, y, cv=5, scoring='accuracy')
+    cv_acc = cv_scores.mean()
+    
+    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, stratify=y, random_state=42)
+    y_pred = stack_model.predict(X_test)
+    test_acc = accuracy_score(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred)
+    
+    return stack_model, scaler, cv_acc, test_acc, cm
 
-stack_model, scaler = train_model(X, y)
+# Train once and cache
+with st.spinner("Loading model... (this happens only once)"):
+    stack_model, scaler, cv_acc, test_acc, cm = train_model()
 
 # ==========================
-# Evaluation (optional)
+# Display model performance
 # ==========================
-cv_scores = cross_val_score(stack_model, scaler.transform(X), y, cv=5, scoring='accuracy')
-cv_acc = cv_scores.mean()
-X_train, X_test, y_train, y_test = train_test_split(scaler.transform(X), y, test_size=0.2, stratify=y, random_state=42)
-y_pred = stack_model.predict(X_test)
-test_acc = accuracy_score(y_test, y_pred)
-
 st.success(f"📊 CV Accuracy: {cv_acc:.3f}")
 st.success(f"✅ Test Accuracy: {test_acc:.3f}")
 
 st.subheader("Confusion Matrix")
-cm = confusion_matrix(y_test, y_pred)
 st.dataframe(pd.DataFrame(cm, columns=['Pred_Normal', 'Pred_Caesarean'], index=['Actual_Normal', 'Actual_Caesarean']))
 
 # ==========================
@@ -124,7 +132,7 @@ def user_input_features():
 input_df = user_input_features()
 
 # ==========================
-# Prediction
+# Prediction (instant!)
 # ==========================
 input_scaled = scaler.transform(input_df)
 pred = stack_model.predict(input_scaled)[0]
