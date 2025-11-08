@@ -2,169 +2,139 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, RandomizedSearchCV, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier, StackingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from imblearn.over_sampling import SMOTE
-from xgboost import XGBClassifier
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
-st.title("🤖 Caesarean Section Prediction App")
-st.info("This AI model predicts the likelihood of a Caesarean (C-section) delivery based on maternal and health factors.")
+# ==========================
+# Streamlit page config
+# ==========================
+st.set_page_config(page_title="C-section Prediction", layout="centered")
+st.title("🤰 Caesarean Section Prediction App")
+st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0).")
 
-# ===========================
-# Load Data
-# ===========================
-df = pd.read_csv("clean_csection_data.csv")
+# ==========================
+# Load dataset
+# ==========================
+@st.cache_data
+def load_data():
+    df = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv")
+    df = df.dropna(subset=["Delivery by caesarean section"])
+    return df
 
-# Rename columns (make sure consistent with your CSV)
-df.columns = [
-    "Delivery_by_caesarean_section",
-    "Current_age",
-    "Body_Mass_Index",
-    "Age_at_first_birth",
-    "Residence_type",
-    "Education_level",
-    "Husband_education_level",
-    "Wealth_index",
-    "Antenatal_visits",
-    "Total_children_ever_born"
-]
+df = load_data()
+target_col = "Delivery by caesarean section"
+X = df.drop(columns=[target_col])
+y = df[target_col].astype(int)
 
-# Separate features and target
-X = df.drop(columns=["Delivery_by_caesarean_section"])
-y = df["Delivery_by_caesarean_section"]
+# ==========================
+# Train model (cached)
+# ==========================
+@st.cache_resource
+def train_model(X, y):
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-# One-hot encode categorical columns
-X = pd.get_dummies(X, columns=["Residence_type", "Education_level", "Husband_education_level", "Wealth_index"], drop_first=True)
+    rf = RandomForestClassifier(n_estimators=200, random_state=42, class_weight="balanced")
+    ada = AdaBoostClassifier(n_estimators=150, random_state=42)
+    gb = GradientBoostingClassifier(n_estimators=150, random_state=42)
 
-# Scale numeric columns
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+    stack_model = StackingClassifier(
+        estimators=[('rf', rf), ('ada', ada), ('gb', gb)],
+        final_estimator=LogisticRegression(class_weight="balanced"),
+        cv=5
+    )
 
-# ===========================
-# Split Data
-# ===========================
-X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42, stratify=y)
+    stack_model.fit(X_scaled, y)
+    return stack_model, scaler
 
-# ===========================
-# Handle Imbalanced Data (SMOTE)
-# ===========================
-smote = SMOTE(random_state=42)
-X_train_res, y_train_res = smote.fit_resample(X_train, y_train)
+stack_model, scaler = train_model(X, y)
 
-# ===========================
-# Hyperparameter Tuning for RandomForest
-# ===========================
-st.write("🎯 Running hyperparameter tuning for Random Forest...")
-param_grid = {
-    'n_estimators': [100, 200, 300],
-    'max_depth': [5, 10, 20, None],
-    'min_samples_split': [2, 5, 10]
-}
+# ==========================
+# Evaluation (optional)
+# ==========================
+cv_scores = cross_val_score(stack_model, scaler.transform(X), y, cv=5, scoring='accuracy')
+cv_acc = cv_scores.mean()
+X_train, X_test, y_train, y_test = train_test_split(scaler.transform(X), y, test_size=0.2, stratify=y, random_state=42)
+y_pred = stack_model.predict(X_test)
+test_acc = accuracy_score(y_test, y_pred)
 
-rf_search = RandomizedSearchCV(
-    RandomForestClassifier(class_weight='balanced', random_state=42),
-    param_distributions=param_grid,
-    n_iter=5,
-    scoring='accuracy',
-    cv=3,
-    n_jobs=-1
-)
-rf_search.fit(X_train_res, y_train_res)
-best_rf = rf_search.best_estimator_
+st.success(f"📊 CV Accuracy: {cv_acc:.3f}")
+st.success(f"✅ Test Accuracy: {test_acc:.3f}")
 
-st.success(f"Best RandomForest Params: {rf_search.best_params_}")
-
-# ===========================
-# Build Advanced Stacking Model
-# ===========================
-xgb = XGBClassifier(n_estimators=300, learning_rate=0.05, max_depth=5, random_state=42, use_label_encoder=False, eval_metric='logloss')
-ada = AdaBoostClassifier(n_estimators=150, random_state=42)
-gb = GradientBoostingClassifier(n_estimators=200, random_state=42)
-
-stacking_model = StackingClassifier(
-    estimators=[
-        ('rf', best_rf),
-        ('ada', ada),
-        ('xgb', xgb),
-        ('gb', gb)
-    ],
-    final_estimator=LogisticRegression(),
-    cv=5
-)
-
-# ===========================
-# Train Model
-# ===========================
-stacking_model.fit(X_train_res, y_train_res)
-
-# ===========================
-# Cross-validation accuracy
-# ===========================
-cv_scores = cross_val_score(stacking_model, X_scaled, y, cv=5, scoring='accuracy')
-st.write(f"📊 **Cross-validation Accuracy:** {cv_scores.mean():.3f}")
-
-# ===========================
-# Evaluate on Test Data
-# ===========================
-y_pred = stacking_model.predict(X_test)
-acc = accuracy_score(y_test, y_pred)
-st.success(f"✅ Test Accuracy: {acc:.3f}")
-
-st.write("### Classification Report")
-st.text(classification_report(y_test, y_pred))
-
-st.write("### Confusion Matrix")
+st.subheader("Confusion Matrix")
 cm = confusion_matrix(y_test, y_pred)
-st.dataframe(pd.DataFrame(cm, columns=['Predicted Normal', 'Predicted Caesarean'], index=['Actual Normal', 'Actual Caesarean']))
+st.dataframe(pd.DataFrame(cm, columns=['Pred_Normal', 'Pred_Caesarean'], index=['Actual_Normal', 'Actual_Caesarean']))
 
-# ===========================
-# Input section for user test
-# ===========================
-st.sidebar.header("🔍 Enter Patient Details")
+# ==========================
+# Sidebar: user input
+# ==========================
+st.sidebar.header("🔍 Input Patient Data")
 
 def user_input_features():
-    Current_age = st.sidebar.slider('Current Age', 15, 50, 28)
-    Body_Mass_Index = st.sidebar.slider('Body Mass Index', 10.0, 40.0, 22.0)
-    Age_at_first_birth = st.sidebar.slider('Age at 1st Birth', 15, 35, 22)
-    Residence_type = st.sidebar.selectbox('Residence Type', ('Urban', 'Rural'))
-    Education_level = st.sidebar.selectbox('Education Level', ('No education', 'Primary', 'Secondary', 'Higher'))
-    Husband_education_level = st.sidebar.selectbox('Husband Education Level', ('No education', 'Primary', 'Secondary', 'Higher'))
-    Wealth_index = st.sidebar.selectbox('Wealth Index', ('Poor', 'Middle', 'Rich'))
-    Antenatal_visits = st.sidebar.slider('Number of Antenatal Visits', 0, 20, 5)
-    Total_children_ever_born = st.sidebar.slider('Total Children Ever Born', 0, 10, 2)
+    age = st.sidebar.slider("Respondent's current age", 15, 49, 28)
+    bmi = st.sidebar.slider("Body Mass Index", 10.0, 50.0, 22.5)
+    age_first_birth = st.sidebar.slider("Age at 1st birth", 10, 40, 20)
+    antenatal = st.sidebar.slider("Number of antenatal visits", 0, 30, 5)
+    total_children = st.sidebar.slider("Total children ever born", 0, 15, 2)
+    residence_urban = st.sidebar.selectbox("Type of residence", ["Rural", "Urban"])
     
+    edu_level = st.sidebar.selectbox("Highest Educational Level", ["No education","Primary","Secondary","Higher"])
+    husband_edu = st.sidebar.selectbox("Husband/Partner's Education Level", ["No education","Primary","Secondary","Higher"])
+    wealth_index = st.sidebar.selectbox("Wealth Index Combined", ["Poorest","Poorer","Middle","Richer","Richest"])
+    
+    # One-hot encoding
+    edu_1 = 1 if edu_level == "Primary" else 0
+    edu_2 = 1 if edu_level == "Secondary" else 0
+    edu_3 = 1 if edu_level == "Higher" else 0
+
+    husband_edu_1 = 1 if husband_edu == "Primary" else 0
+    husband_edu_2 = 1 if husband_edu == "Secondary" else 0
+    husband_edu_3 = 1 if husband_edu == "Higher" else 0
+
+    wealth_2 = 1 if wealth_index == "Poorer" else 0
+    wealth_3 = 1 if wealth_index == "Middle" else 0
+    wealth_4 = 1 if wealth_index == "Richer" else 0
+    wealth_5 = 1 if wealth_index == "Richest" else 0
+
     data = {
-        'Current_age': Current_age,
-        'Body_Mass_Index': Body_Mass_Index,
-        'Age_at_first_birth': Age_at_first_birth,
-        'Residence_type': Residence_type,
-        'Education_level': Education_level,
-        'Husband_education_level': Husband_education_level,
-        'Wealth_index': Wealth_index,
-        'Antenatal_visits': Antenatal_visits,
-        'Total_children_ever_born': Total_children_ever_born
+        "Respondent's current age": age,
+        "Body Mass Index": bmi,
+        "Age of respondent at 1st birth": age_first_birth,
+        "Number of antenatal visits": antenatal,
+        "Total children ever born": total_children,
+        "Type of place of residence_2": 1 if residence_urban == "Urban" else 0,
+        "Highest educational level_1": edu_1,
+        "Highest educational level_2": edu_2,
+        "Highest educational level_3": edu_3,
+        "Husband/partner's education level_1.0": husband_edu_1,
+        "Husband/partner's education level_2.0": husband_edu_2,
+        "Husband/partner's education level_3.0": husband_edu_3,
+        "Husband/partner's education level_8.0": 0,
+        "Wealth index combined_2": wealth_2,
+        "Wealth index combined_3": wealth_3,
+        "Wealth index combined_4": wealth_4,
+        "Wealth index combined_5": wealth_5
     }
+
     return pd.DataFrame(data, index=[0])
 
 input_df = user_input_features()
 
-# Combine with training data for encoding
-combined_df = pd.concat([input_df, df.drop(columns=["Delivery_by_caesarean_section"])], axis=0)
-combined_encoded = pd.get_dummies(combined_df, columns=["Residence_type", "Education_level", "Husband_education_level", "Wealth_index"], drop_first=True)
-
-input_scaled = scaler.transform(combined_encoded[:1])
-
-prediction = stacking_model.predict(input_scaled)
-prediction_proba = stacking_model.predict_proba(input_scaled)
+# ==========================
+# Prediction
+# ==========================
+input_scaled = scaler.transform(input_df)
+pred = stack_model.predict(input_scaled)[0]
+pred_proba = stack_model.predict_proba(input_scaled)[0]
 
 st.subheader("🧠 Prediction Result")
-if prediction[0] == 1:
-    st.error("⚠️ Caesarean delivery likely.")
+if pred == 1:
+    st.error("⚠️ Caesarean delivery likely (1)")
 else:
-    st.success("✅ Normal delivery likely.")
+    st.success("✅ Normal delivery likely (0)")
 
 st.write("### Prediction Probabilities")
-st.write(pd.DataFrame(prediction_proba, columns=["Normal", "Caesarean"]))
+st.dataframe(pd.DataFrame([pred_proba], columns=["Normal", "Caesarean"]))
