@@ -18,7 +18,7 @@ st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0).")
 # ==========================
 # Load dataset
 # ==========================
-df = pd.read_csv("cleaned_for_ml.csv")
+df = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv")
 
 target_col = "Delivery by caesarean section"
 df = df.dropna(subset=[target_col])
