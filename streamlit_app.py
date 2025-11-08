@@ -3,10 +3,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier, StackingClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, confusion_matrix
 
 # ==========================
 # Streamlit page config
@@ -16,16 +15,7 @@ st.title("🤰 Caesarean Section Prediction App")
 st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0).")
 
 # ==========================
-# Load dataset
-# ==========================
-@st.cache_data
-def load_data():
-    df = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv")
-    df = df.dropna(subset=["Delivery by caesarean section"])
-    return df
-
-# ==========================
-# Train model (cached) - FIXED VERSION
+# Train model (cached)
 # ==========================
 @st.cache_resource
 def train_model():
@@ -49,9 +39,7 @@ def train_model():
     # Calculate scale_pos_weight for imbalanced data
     scale_pos = (y == 0).sum() / (y == 1).sum()
     
-    # Use XGBoost-style approach with heavy focus on minority class
-    from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-    
+    # Use ensemble with heavy focus on minority class
     rf = RandomForestClassifier(
         n_estimators=500, 
         max_depth=10,
@@ -185,8 +173,8 @@ input_df = pd.DataFrame(input_data, index=[0])
 # Prediction (instant!)
 # ==========================
 input_scaled = scaler.transform(input_df)
-pred = stack_model.predict(input_scaled)[0]
-pred_proba = stack_model.predict_proba(input_scaled)[0]
+pred = ensemble_model.predict(input_scaled)[0]
+pred_proba = ensemble_model.predict_proba(input_scaled)[0]
 
 st.subheader("🧠 Prediction Result")
 
