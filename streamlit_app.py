@@ -81,55 +81,52 @@ st.dataframe(pd.DataFrame(cm, columns=['Pred_Normal', 'Pred_Caesarean'], index=[
 # ==========================
 st.sidebar.header("🔍 Input Patient Data")
 
-def user_input_features():
-    age = st.sidebar.slider("Respondent's current age", 15, 49, 28)
-    bmi = st.sidebar.slider("Body Mass Index", 10.0, 50.0, 22.5)
-    age_first_birth = st.sidebar.slider("Age at 1st birth", 10, 40, 20)
-    antenatal = st.sidebar.slider("Number of antenatal visits", 0, 30, 5)
-    total_children = st.sidebar.slider("Total children ever born", 0, 15, 2)
-    residence_urban = st.sidebar.selectbox("Type of residence", ["Rural", "Urban"])
-    
-    edu_level = st.sidebar.selectbox("Highest Educational Level", ["No education","Primary","Secondary","Higher"])
-    husband_edu = st.sidebar.selectbox("Husband/Partner's Education Level", ["No education","Primary","Secondary","Higher"])
-    wealth_index = st.sidebar.selectbox("Wealth Index Combined", ["Poorest","Poorer","Middle","Richer","Richest"])
-    
-    # One-hot encoding
-    edu_1 = 1 if edu_level == "Primary" else 0
-    edu_2 = 1 if edu_level == "Secondary" else 0
-    edu_3 = 1 if edu_level == "Higher" else 0
+age = st.sidebar.slider("Respondent's current age", 15, 49, 28, key="age")
+bmi = st.sidebar.slider("Body Mass Index", 10.0, 50.0, 22.5, key="bmi")
+age_first_birth = st.sidebar.slider("Age at 1st birth", 10, 40, 20, key="age_first")
+antenatal = st.sidebar.slider("Number of antenatal visits", 0, 30, 5, key="antenatal")
+total_children = st.sidebar.slider("Total children ever born", 0, 15, 2, key="children")
+residence_urban = st.sidebar.selectbox("Type of residence", ["Rural", "Urban"], key="residence")
 
-    husband_edu_1 = 1 if husband_edu == "Primary" else 0
-    husband_edu_2 = 1 if husband_edu == "Secondary" else 0
-    husband_edu_3 = 1 if husband_edu == "Higher" else 0
+edu_level = st.sidebar.selectbox("Highest Educational Level", ["No education","Primary","Secondary","Higher"], key="edu")
+husband_edu = st.sidebar.selectbox("Husband/Partner's Education Level", ["No education","Primary","Secondary","Higher"], key="husband_edu")
+wealth_index = st.sidebar.selectbox("Wealth Index Combined", ["Poorest","Poorer","Middle","Richer","Richest"], key="wealth")
 
-    wealth_2 = 1 if wealth_index == "Poorer" else 0
-    wealth_3 = 1 if wealth_index == "Middle" else 0
-    wealth_4 = 1 if wealth_index == "Richer" else 0
-    wealth_5 = 1 if wealth_index == "Richest" else 0
+# One-hot encoding
+edu_1 = 1 if edu_level == "Primary" else 0
+edu_2 = 1 if edu_level == "Secondary" else 0
+edu_3 = 1 if edu_level == "Higher" else 0
 
-    data = {
-        "Respondent's current age": age,
-        "Body Mass Index": bmi,
-        "Age of respondent at 1st birth": age_first_birth,
-        "Number of antenatal visits": antenatal,
-        "Total children ever born": total_children,
-        "Type of place of residence_2": 1 if residence_urban == "Urban" else 0,
-        "Highest educational level_1": edu_1,
-        "Highest educational level_2": edu_2,
-        "Highest educational level_3": edu_3,
-        "Husband/partner's education level_1.0": husband_edu_1,
-        "Husband/partner's education level_2.0": husband_edu_2,
-        "Husband/partner's education level_3.0": husband_edu_3,
-        "Husband/partner's education level_8.0": 0,
-        "Wealth index combined_2": wealth_2,
-        "Wealth index combined_3": wealth_3,
-        "Wealth index combined_4": wealth_4,
-        "Wealth index combined_5": wealth_5
-    }
+husband_edu_1 = 1 if husband_edu == "Primary" else 0
+husband_edu_2 = 1 if husband_edu == "Secondary" else 0
+husband_edu_3 = 1 if husband_edu == "Higher" else 0
 
-    return pd.DataFrame(data, index=[0])
+wealth_2 = 1 if wealth_index == "Poorer" else 0
+wealth_3 = 1 if wealth_index == "Middle" else 0
+wealth_4 = 1 if wealth_index == "Richer" else 0
+wealth_5 = 1 if wealth_index == "Richest" else 0
 
-input_df = user_input_features()
+input_data = {
+    "Respondent's current age": age,
+    "Body Mass Index": bmi,
+    "Age of respondent at 1st birth": age_first_birth,
+    "Number of antenatal visits": antenatal,
+    "Total children ever born": total_children,
+    "Type of place of residence_2": 1 if residence_urban == "Urban" else 0,
+    "Highest educational level_1": edu_1,
+    "Highest educational level_2": edu_2,
+    "Highest educational level_3": edu_3,
+    "Husband/partner's education level_1.0": husband_edu_1,
+    "Husband/partner's education level_2.0": husband_edu_2,
+    "Husband/partner's education level_3.0": husband_edu_3,
+    "Husband/partner's education level_8.0": 0,
+    "Wealth index combined_2": wealth_2,
+    "Wealth index combined_3": wealth_3,
+    "Wealth index combined_4": wealth_4,
+    "Wealth index combined_5": wealth_5
+}
+
+input_df = pd.DataFrame(input_data, index=[0])
 
 # ==========================
 # Prediction (instant!)
@@ -145,4 +142,11 @@ else:
     st.success("✅ Normal delivery likely (0)")
 
 st.write("### Prediction Probabilities")
-st.dataframe(pd.DataFrame([pred_proba], columns=["Normal", "Caesarean"]))
+prob_df = pd.DataFrame([pred_proba], columns=["Normal", "Caesarean"])
+prob_df['Normal'] = prob_df['Normal'].apply(lambda x: f"{x:.1%}")
+prob_df['Caesarean'] = prob_df['Caesarean'].apply(lambda x: f"{x:.1%}")
+st.dataframe(prob_df)
+
+# Debug: Show input values
+with st.expander("🔍 View Input Values (Debug)"):
+    st.dataframe(input_df)
