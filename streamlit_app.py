@@ -1,192 +1,114 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import confusion_matrix, classification_report
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-st.set_page_config(page_title="C-section Prediction", layout="centered")
-st.title("🤰 Caesarean Section Prediction App")
-st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0).")
+st.title("🍼 Caesarean Section Prediction App")
+st.info("Predict whether delivery will be Caesarean or Normal using machine learning.")
 
-# -------------------------
-# Helper: find target column
-# -------------------------
-def find_target_column(df):
-    candidates = [
-        "Delivery_by_caesarean_section",
-        "Delivery by caesarean section",
-        "delivery_by_caesarean_section",
-        "delivery by caesarean section",
-        "m17", "M17", "target"
-    ]
-    for c in candidates:
-        if c in df.columns:
-            return c
-    # fallback: try to find a column that is binary (only 0 and 1)
-    for col in df.columns:
-        uniq = pd.Series(df[col].dropna().unique()).astype(str).str.strip().str.lower()
-        if set(uniq).issubset({"0","1","yes","no","true","false","caesarean","normal","vaginal","cs"}):
-            return col
-    return df.columns[-1]
-
-# -------------------------
 # Load dataset
-# -------------------------
-try:
-    raw = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv")
-except Exception as e:
-    st.error("⚠️ Could not load 'cleaned_for_ml.csv'. Please check the file path or link.")
-    st.stop()
+df = pd.read_csv("cleaned_IR_dataset.csv")
 
-st.write("📄 **Loaded Columns:**")
-st.write(raw.columns.tolist())
+st.subheader("📊 Dataset Overview")
+st.write(df.head())
 
-# Identify target column
-target_col = find_target_column(raw)
-st.write(f"🎯 Using target column: **{target_col}**")
+# --- Data Preparation ---
+# Ensure BMI has no negative values
+df["Body_Mass_Index"] = df["Body_Mass_Index"].apply(lambda x: max(x, 0))
 
-# -------------------------
-# Clean and prepare dataset
-# -------------------------
-def normalize_target(v):
-    if pd.isna(v):
-        return np.nan
-    s = str(v).strip().lower()
-    if s in {"yes","y","1","true","t","c","c-section","caesarean","caesarean section","cs"}:
-        return 1
-    if s in {"no","n","0","false","f","normal","vaginal","vaginal delivery"}:
-        return 0
-    try:
-        return int(float(s))
-    except:
-        return np.nan
-
-data = raw.copy()
-data[target_col] = data[target_col].apply(normalize_target)
-data = data.dropna(subset=[target_col]).reset_index(drop=True)
-
-numeric_cols = [
-    "Respondent's current age",
-    "Body Mass Index",
-    "Age of respondent at 1st birth",
-    "Number of antenatal visits",
-    "Total children ever born"
+# Encode categorical variables
+cat_cols = [
+    "Type_of_place_of_residence",
+    "Highest_educational_level",
+    "Husband_partner_education_level",
+    "Wealth_index_combined"
 ]
 
-categorical_cols = [
-    "Type of place of residence",
-    "Highest educational level",
-    "Husband/partner's education level",
-    "Wealth index combined"
-]
+df_encoded = pd.get_dummies(df, columns=cat_cols, drop_first=True)
 
-# Clean numeric columns
-for col in numeric_cols:
-    if col in data.columns:
-        data[col] = pd.to_numeric(data[col], errors='coerce')
-        data[col] = data[col].fillna(data[col].median())
+# Split features and target
+X = df_encoded.drop(columns=["Delivery_by_caesarean_section"])
+y = df_encoded["Delivery_by_caesarean_section"]
 
-# Fill missing categorical with mode
-for col in categorical_cols:
-    if col in data.columns:
-        data[col] = data[col].astype(str).str.strip().replace({'nan': np.nan, 'None': np.nan, '': np.nan})
-        mode = data[col].mode(dropna=True)
-        data[col] = data[col].fillna(mode[0] if len(mode) > 0 else "missing")
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
 
-X_unencoded = data.drop(columns=[target_col])
-y = data[target_col].astype(int)
-
-# -------------------------
-# Sidebar inputs
-# -------------------------
-st.sidebar.header("🧍 Input Features")
-
-def get_median(col):
-    if col in X_unencoded.columns:
-        return float(X_unencoded[col].median())
-    return 0.0
-
-age = st.sidebar.slider("Respondent's current age", 10, 60, int(get_median("Respondent's current age")))
-bmi = st.sidebar.slider("Body Mass Index (BMI)", 10.0, 60.0, float(round(get_median("Body Mass Index"),1)))
-age_first_birth = st.sidebar.slider("Age at 1st birth", 10, 50, int(get_median("Age of respondent at 1st birth")))
-
-# ✅ Fixed categorical options
-residence = st.sidebar.selectbox("Type of place of residence", ["Rural", "Urban"])
-education = st.sidebar.selectbox("Highest educational level", ["Primary", "High"])
-husband_edu = st.sidebar.selectbox("Husband/partner's education level", ["Primary", "High"])
-wealth = st.sidebar.selectbox("Wealth index combined", ["Poor", "Middle", "Rich"])
-
-antenatal_visits = st.sidebar.slider("Number of antenatal visits", 0, 30, int(get_median("Number of antenatal visits")))
-total_children = st.sidebar.slider("Total children ever born", 0, 20, int(get_median("Total children ever born")))
-
-# Combine user inputs into a DataFrame
-input_data = {
-    "Respondent's current age": age,
-    "Body Mass Index": bmi,
-    "Age of respondent at 1st birth": age_first_birth,
-    "Type of place of residence": residence,
-    "Highest educational level": education,
-    "Husband/partner's education level": husband_edu,
-    "Wealth index combined": wealth,
-    "Number of antenatal visits": antenatal_visits,
-    "Total children ever born": total_children
-}
-input_df = pd.DataFrame(input_data, index=[0])
-
-st.subheader("📋 Input Preview")
-st.write(input_df)
-
-# -------------------------
-# One-hot encode
-# -------------------------
-combined = pd.concat([input_df, X_unencoded], axis=0, ignore_index=True)
-combined_encoded = pd.get_dummies(combined, drop_first=True)
-
-input_encoded = combined_encoded.iloc[[0]].copy()
-X_encoded = combined_encoded.iloc[1:].copy()
-
-# Align columns
-for c in X_encoded.columns:
-    if c not in input_encoded.columns:
-        input_encoded[c] = 0
-for c in input_encoded.columns:
-    if c not in X_encoded.columns:
-        X_encoded[c] = 0
-
-X_encoded = X_encoded.reindex(sorted(X_encoded.columns), axis=1)
-input_encoded = input_encoded.reindex(sorted(X_encoded.columns), axis=1)
-
-# -------------------------
-# Scale numeric features
-# -------------------------
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X_encoded)
-input_scaled = scaler.transform(input_encoded)
-
-# -------------------------
 # Train model
-# -------------------------
-model = RandomForestClassifier(n_estimators=100, random_state=42)
-model.fit(X_scaled, y)
+clf = RandomForestClassifier(class_weight='balanced', random_state=42)
+clf.fit(X_train, y_train)
 
-st.success("✅ Model trained successfully (Random Forest)")
+# --- Evaluation ---
+y_pred = clf.predict(X_test)
 
-# -------------------------
-# Predict
-# -------------------------
-pred = model.predict(input_scaled)[0]
-pred_proba = model.predict_proba(input_scaled)[0]
+st.subheader("📈 Model Performance")
 
-label_map = {0: "Normal Delivery", 1: "Caesarean"}
-st.subheader("🎯 Prediction Result")
-if pred == 1:
-    st.error(f"Predicted outcome: {label_map[pred]} (1)")
-else:
-    st.success(f"Predicted outcome: {label_map[pred]} (0)")
+# Confusion Matrix
+cm = confusion_matrix(y_test, y_pred)
+fig, ax = plt.subplots()
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=["Normal", "C-Section"], yticklabels=["Normal", "C-Section"])
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.title("Confusion Matrix")
+st.pyplot(fig)
 
-proba_df = pd.DataFrame([pred_proba], columns=[f"Prob_{c}" for c in model.classes_])
-proba_df.columns = ["Prob_Normal_Delivery", "Prob_Caesarean"]
-st.subheader("📈 Prediction Probabilities")
-st.write(proba_df.T)
+# Classification Report
+st.write("### 🧾 Classification Report")
+report = classification_report(y_test, y_pred, target_names=["Normal", "C-Section"], output_dict=True)
+st.dataframe(pd.DataFrame(report).transpose())
 
-st.caption("🔍 This app reproduces the same data cleaning and encoding steps used for model training.")
+# Feature Importance
+st.write("### 🌿 Feature Importance")
+feat_importances = pd.Series(clf.feature_importances_, index=X.columns)
+fig_imp, ax_imp = plt.subplots()
+feat_importances.nlargest(10).plot(kind='barh', ax=ax_imp)
+plt.title("Top 10 Important Features")
+st.pyplot(fig_imp)
+
+# --- Prediction Section ---
+st.sidebar.header("🧍 Input for Prediction")
+
+def user_input_features():
+    age = st.sidebar.slider("Respondent's Current Age", 15, 49, 28)
+    bmi = st.sidebar.slider("Body Mass Index", 0.0, 50.0, 22.5)
+    age_first_birth = st.sidebar.slider("Age at First Birth", 12, 40, 20)
+    antenatal_visits = st.sidebar.slider("Number of Antenatal Visits", 0, 20, 5)
+    total_children = st.sidebar.slider("Total Children Ever Born", 0, 10, 2)
+    residence = st.sidebar.selectbox("Type of Residence", df["Type_of_place_of_residence"].unique())
+    edu = st.sidebar.selectbox("Highest Education Level", df["Highest_educational_level"].unique())
+    husband_edu = st.sidebar.selectbox("Husband/Partner Education Level", df["Husband_partner_education_level"].unique())
+    wealth = st.sidebar.selectbox("Wealth Index", df["Wealth_index_combined"].unique())
+
+    data = {
+        "Respondents_current_age": age,
+        "Body_Mass_Index": bmi,
+        "Age_of_respondent_at_1st_birth": age_first_birth,
+        "Number_of_antenatal_visits": antenatal_visits,
+        "Total_children_ever_born": total_children,
+        "Type_of_place_of_residence": residence,
+        "Highest_educational_level": edu,
+        "Husband_partner_education_level": husband_edu,
+        "Wealth_index_combined": wealth
+    }
+    return pd.DataFrame(data, index=[0])
+
+input_df = user_input_features()
+
+# Prepare input for prediction (same encoding)
+input_encoded = pd.get_dummies(input_df, columns=cat_cols, drop_first=True)
+input_encoded = input_encoded.reindex(columns=X.columns, fill_value=0)
+
+prediction = clf.predict(input_encoded)[0]
+prediction_proba = clf.predict_proba(input_encoded)[0]
+
+st.subheader("🔮 Prediction Result")
+st.write("**Predicted Outcome:**", "🩺 Caesarean Section" if prediction == 1 else "👶 Normal Delivery")
+
+st.write("**Prediction Probability:**")
+st.write(f"Normal Delivery: {prediction_proba[0]:.2f}")
+st.write(f"Caesarean Section: {prediction_proba[1]:.2f}")
