@@ -7,8 +7,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier, StackingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from imblearn.over_sampling import SMOTE
 
+# ==========================
+# Streamlit page config
+# ==========================
 st.set_page_config(page_title="C-section Prediction", layout="centered")
 st.title("🤰 Caesarean Section Prediction App")
 st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0).")
@@ -18,17 +20,14 @@ st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0).")
 # ==========================
 df = pd.read_csv("cleaned_for_ml.csv")
 
-# Last column = target
 target_col = "Delivery by caesarean section"
-
-# Drop NaN if any
 df = df.dropna(subset=[target_col])
 
 X = df.drop(columns=[target_col])
 y = df[target_col].astype(int)
 
 # ==========================
-# Train/Test split
+# Train/Test split & scaling
 # ==========================
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
@@ -38,25 +37,22 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 # ==========================
-# Handle imbalance (SMOTE)
+# Define models with class_weight
 # ==========================
-smote = SMOTE(random_state=42)
-X_train_res, y_train_res = smote.fit_resample(X_train, y_train)
-
-# ==========================
-# Stacking model
-# ==========================
-rf = RandomForestClassifier(n_estimators=200, random_state=42)
+rf = RandomForestClassifier(
+    n_estimators=200, random_state=42, class_weight="balanced"
+)
 ada = AdaBoostClassifier(n_estimators=150, random_state=42)
 gb = GradientBoostingClassifier(n_estimators=150, random_state=42)
 
 stack_model = StackingClassifier(
     estimators=[('rf', rf), ('ada', ada), ('gb', gb)],
-    final_estimator=LogisticRegression(),
+    final_estimator=LogisticRegression(class_weight="balanced"),
     cv=5
 )
 
-stack_model.fit(X_train_res, y_train_res)
+# Train model
+stack_model.fit(X_train, y_train)
 
 # ==========================
 # Evaluation
@@ -124,7 +120,7 @@ def user_input_features():
 input_df = user_input_features()
 
 # ==========================
-# Predict
+# Prediction
 # ==========================
 input_scaled = scaler.transform(input_df)
 pred = stack_model.predict(input_scaled)[0]
