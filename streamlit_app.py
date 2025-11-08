@@ -6,14 +6,14 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier, StackingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, confusion_matrix
 
 # ==========================
 # Streamlit page config
 # ==========================
 st.set_page_config(page_title="C-section Prediction", layout="centered")
 st.title("🤰 Caesarean Section Prediction App")
-st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0).")
+st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0) and shows feature contributions.")
 
 # ==========================
 # Load dataset
@@ -48,12 +48,12 @@ def train_model(X, y):
     )
 
     stack_model.fit(X_scaled, y)
-    return stack_model, scaler
+    return stack_model, scaler, rf  # Return RF for feature importance
 
-stack_model, scaler = train_model(X, y)
+stack_model, scaler, rf_model = train_model(X, y)
 
 # ==========================
-# Evaluation (optional)
+# Evaluation
 # ==========================
 cv_scores = cross_val_score(stack_model, scaler.transform(X), y, cv=5, scoring='accuracy')
 cv_acc = cv_scores.mean()
@@ -138,3 +138,16 @@ else:
 
 st.write("### Prediction Probabilities")
 st.dataframe(pd.DataFrame([pred_proba], columns=["Normal", "Caesarean"]))
+
+# ==========================
+# Feature Contribution / Risk
+# ==========================
+st.subheader("⚠️ Feature Contribution / Risk Factors")
+feature_importances = pd.Series(rf_model.feature_importances_, index=X.columns)
+feature_importances_sorted = feature_importances.sort_values(ascending=False)
+
+# Only show top 5 contributors
+top5 = feature_importances_sorted.head(5)
+st.write("Top contributing features for prediction:")
+for feat, val in top5.items():
+    st.write(f"{feat}: {val:.3f}")
