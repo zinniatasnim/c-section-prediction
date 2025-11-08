@@ -16,61 +16,47 @@ st.title("🤰 Caesarean Section Prediction App")
 st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0).")
 
 # ==========================
-# Load dataset
+# Caching: Load dataset once
 # ==========================
-df = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv")
-
-target_col = "Delivery by caesarean section"
-df = df.dropna(subset=[target_col])
-
-X = df.drop(columns=[target_col])
-y = df[target_col].astype(int)
-
-# ==========================
-# Train/Test split & scaling
-# ==========================
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X_scaled, y, test_size=0.2, stratify=y, random_state=42
-)
+@st.cache_data
+def load_dataset():
+    df = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv")
+    df = df.dropna(subset=["Delivery by caesarean section"])
+    X = df.drop(columns=["Delivery by caesarean section"])
+    y = df["Delivery by caesarean section"].astype(int)
+    return X, y
 
 # ==========================
-# Define models with class_weight
+# Caching: Train model once
 # ==========================
-rf = RandomForestClassifier(
-    n_estimators=200, random_state=42, class_weight="balanced"
-)
-ada = AdaBoostClassifier(n_estimators=150, random_state=42)
-gb = GradientBoostingClassifier(n_estimators=150, random_state=42)
+@st.cache_resource
+def train_model(X, y):
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-stack_model = StackingClassifier(
-    estimators=[('rf', rf), ('ada', ada), ('gb', gb)],
-    final_estimator=LogisticRegression(class_weight="balanced"),
-    cv=5
-)
-
-# Train model
-stack_model.fit(X_train, y_train)
+    rf = RandomForestClassifier(n_estimators=200, random_state=42, class_weight="balanced")
+    ada = AdaBoostClassifier(n_estimators=150, random_state=42)
+    gb = GradientBoostingClassifier(n_estimators=150, random_state=42)
+    stack_model = StackingClassifier(
+        estimators=[('rf', rf), ('ada', ada), ('gb', gb)],
+        final_estimator=LogisticRegression(class_weight="balanced"),
+        cv=5
+    )
+    stack_model.fit(X_scaled, y)
+    return stack_model, scaler
 
 # ==========================
-# Evaluation
+# Load and train
 # ==========================
+X, y = load_dataset()
+stack_model, scaler = train_model(X, y)
+
+# ==========================
+# Evaluation (optional)
+# ==========================
+X_scaled = scaler.transform(X)
 cv_scores = cross_val_score(stack_model, X_scaled, y, cv=5, scoring='accuracy')
-cv_acc = cv_scores.mean()
-y_pred = stack_model.predict(X_test)
-test_acc = accuracy_score(y_test, y_pred)
-
-st.success(f"📊 Cross-validation Accuracy: {cv_acc:.3f}")
-st.success(f"✅ Test Accuracy: {test_acc:.3f}")
-
-st.subheader("Classification Report")
-st.text(classification_report(y_test, y_pred))
-
-st.subheader("Confusion Matrix")
-cm = confusion_matrix(y_test, y_pred)
-st.dataframe(pd.DataFrame(cm, columns=['Pred_Normal', 'Pred_Caesarean'], index=['Actual_Normal', 'Actual_Caesarean']))
+st.success(f"📊 Cross-validation Accuracy: {cv_scores.mean():.3f}")
 
 # ==========================
 # Sidebar: user input
@@ -85,7 +71,7 @@ def user_input_features():
     total_children = st.sidebar.slider("Total children ever born", 0, 15, 2)
     residence_urban = st.sidebar.selectbox("Type of residence", ["Rural", "Urban"])
     
-    # Dropdowns instead of checkboxes
+    # Dropdowns for education and wealth
     edu_level = st.sidebar.selectbox("Highest Educational Level", ["No education","Primary","Secondary","Higher"])
     husband_edu = st.sidebar.selectbox("Husband/Partner's Education Level", ["No education","Primary","Secondary","Higher"])
     wealth_index = st.sidebar.selectbox("Wealth Index Combined", ["Poorest","Poorer","Middle","Richer","Richest"])
