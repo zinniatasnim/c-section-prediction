@@ -237,4 +237,3 @@ cols = ["Prob_Normal", "Prob_Caesarean"]
 proba_df = pd.DataFrame([pred_proba], columns=cols)
 st.dataframe(proba_df.T)
 
-st.caption("If Altair is not installed, plots will be displayed as tables. To enable charts, install Altair (`pip install altair`).")
