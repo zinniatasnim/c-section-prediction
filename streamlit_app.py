@@ -4,111 +4,237 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import confusion_matrix, classification_report
-import matplotlib.pyplot as plt
-import seaborn as sns
+from sklearn.preprocessing import StandardScaler
 
+# Use Altair for plotting (preferred in Streamlit)
+try:
+    import altair as alt
+    ALT_AVAILABLE = True
+except Exception:
+    ALT_AVAILABLE = False
+
+st.set_page_config(page_title="C-section Prediction (no-mpl)", layout="centered")
 st.title("🍼 Caesarean Section Prediction App")
-st.info("Predict whether delivery will be Caesarean or Normal using machine learning.")
+st.info("Predict whether delivery will be Caesarean or Normal using ML. (No matplotlib required)")
 
-# Load dataset
-df = pd.read_csv("cleaned_IR_dataset.csv")
+# -------------------------
+# Load dataset (try local then fallback to GitHub link)
+# -------------------------
+def load_df():
+    # try local file first
+    for path in ["cleaned_IR_dataset.csv", "cleaned_for_ml.csv", "cleaned_dataset.csv"]:
+        try:
+            df_local = pd.read_csv(path)
+            st.success(f"Loaded dataset from local file: {path}")
+            return df_local
+        except Exception:
+            pass
+    # fallback remote (change this to your repo/file if desired)
+    try:
+        url = "https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv"
+        df_remote = pd.read_csv(url)
+        st.success("Loaded dataset from remote GitHub URL")
+        return df_remote
+    except Exception as e:
+        st.error("Could not load dataset from local files or remote URL. Place a CSV named 'cleaned_for_ml.csv' in the app folder or update the URL.")
+        st.stop()
 
-st.subheader("📊 Dataset Overview")
-st.write(df.head())
+df = load_df()
 
-# --- Data Preparation ---
-# Ensure BMI has no negative values
-df["Body_Mass_Index"] = df["Body_Mass_Index"].apply(lambda x: max(x, 0))
+st.write("## Dataset preview")
+st.dataframe(df.head())
 
-# Encode categorical variables
-cat_cols = [
-    "Type_of_place_of_residence",
-    "Highest_educational_level",
-    "Husband_partner_education_level",
-    "Wealth_index_combined"
+# Basic column name mapping/fallbacks (try to detect)
+possible_target_names = [
+    "Delivery_by_caesarean_section",
+    "Delivery by caesarean section",
+    "delivery_by_caesarean_section",
+    "delivery by caesarean section",
+    "M17", "m17", "target"
+]
+target_col = None
+for c in possible_target_names:
+    if c in df.columns:
+        target_col = c
+        break
+if target_col is None:
+    # fallback: choose a binary-like column
+    for col in df.columns:
+        uniq = pd.Series(df[col].dropna().unique()).astype(str).str.strip().str.lower()
+        if set(uniq).issubset({"0","1","yes","no","true","false","c","cs","caesarean","normal","vaginal"}):
+            target_col = col
+            break
+if target_col is None:
+    st.error("Could not detect a target column automatically. Make sure your CSV has a target column indicating c-section (0/1 or yes/no).")
+    st.stop()
+
+st.write(f"Using target column: **{target_col}**")
+
+# Common expected column names in your dataset (adjust if your CSV differs)
+numeric_cols = [
+    "Respondent's current age",
+    "Body Mass Index",
+    "Age of respondent at 1st birth",
+    "Number of antenatal visits",
+    "Total children ever born"
+]
+categorical_cols = [
+    "Type of place of residence",
+    "Highest educational level",
+    "Husband/partner's education level",
+    "Wealth index combined"
 ]
 
-df_encoded = pd.get_dummies(df, columns=cat_cols, drop_first=True)
+# --- CLEANING ---
+def normalize_target(v):
+    if pd.isna(v):
+        return np.nan
+    s = str(v).strip().lower()
+    if s in {"yes","y","1","true","t","c","c-section","caesarean","caesarean section","cs"}:
+        return 1
+    if s in {"no","n","0","false","f","normal","vaginal","vaginal delivery"}:
+        return 0
+    try:
+        return int(float(s))
+    except:
+        return np.nan
 
-# Split features and target
-X = df_encoded.drop(columns=["Delivery_by_caesarean_section"])
-y = df_encoded["Delivery_by_caesarean_section"]
+data = df.copy()
+data[target_col] = data[target_col].apply(normalize_target)
+data = data.dropna(subset=[target_col]).reset_index(drop=True)
+y = data[target_col].astype(int)
 
-# Train-test split
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
-)
+# numeric cleaning
+for col in numeric_cols:
+    if col in data.columns:
+        data[col] = pd.to_numeric(data[col], errors='coerce')
+        # replace negative BMI or unrealistic values with median or clip
+        if col == "Body Mass Index":
+            data[col] = data[col].clip(lower=0)
+        data[col] = data[col].fillna(data[col].median())
 
-# Train model
-clf = RandomForestClassifier(class_weight='balanced', random_state=42)
+# categorical cleaning
+for col in categorical_cols:
+    if col in data.columns:
+        data[col] = data[col].astype(str).str.strip().replace({'nan': np.nan, 'None': np.nan, '': np.nan})
+        m = data[col].mode(dropna=True)
+        if len(m) > 0:
+            data[col] = data[col].fillna(m.iloc[0])
+        else:
+            data[col] = data[col].fillna("missing")
+
+# Prepare unencoded features (for consistent get_dummies)
+X_unencoded = data.drop(columns=[target_col]).copy()
+
+# --- ENCODE & TRAIN ---
+# one-hot encode categorical columns (safe even if some categories are different)
+combined_all = pd.get_dummies(X_unencoded, drop_first=True)
+X = combined_all.copy()
+
+# scale numeric features
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# split
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42, stratify=y)
+
+# classifier with balanced class weight
+clf = RandomForestClassifier(class_weight='balanced', n_estimators=100, random_state=42)
 clf.fit(X_train, y_train)
 
-# --- Evaluation ---
+st.success("✅ Model trained (RandomForest with class_weight='balanced')")
+
+# --- EVALUATION ---
 y_pred = clf.predict(X_test)
-
-st.subheader("📈 Model Performance")
-
-# Confusion Matrix
 cm = confusion_matrix(y_test, y_pred)
-fig, ax = plt.subplots()
-sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=["Normal", "C-Section"], yticklabels=["Normal", "C-Section"])
-plt.xlabel("Predicted")
-plt.ylabel("Actual")
-plt.title("Confusion Matrix")
-st.pyplot(fig)
+report_dict = classification_report(y_test, y_pred, target_names=["Normal", "C-Section"], output_dict=True)
+report_df = pd.DataFrame(report_dict).transpose()
 
-# Classification Report
-st.write("### 🧾 Classification Report")
-report = classification_report(y_test, y_pred, target_names=["Normal", "C-Section"], output_dict=True)
-st.dataframe(pd.DataFrame(report).transpose())
+st.write("## Model evaluation")
+st.write("### Classification report")
+st.dataframe(report_df)
 
-# Feature Importance
-st.write("### 🌿 Feature Importance")
-feat_importances = pd.Series(clf.feature_importances_, index=X.columns)
-fig_imp, ax_imp = plt.subplots()
-feat_importances.nlargest(10).plot(kind='barh', ax=ax_imp)
-plt.title("Top 10 Important Features")
-st.pyplot(fig_imp)
+# Confusion matrix plot (Altair if available; otherwise table)
+cm_df = pd.DataFrame(cm, index=["Actual_Normal", "Actual_C-Section"], columns=["Pred_Normal", "Pred_C-Section"])
+if ALT_AVAILABLE:
+    cm_long = (cm_df.reset_index().melt(id_vars="index"))
+    cm_long.columns = ["Actual", "Predicted", "Count"]
+    chart = alt.Chart(cm_long).mark_rect().encode(
+        x=alt.X("Predicted:N", title="Predicted"),
+        y=alt.Y("Actual:N", title="Actual"),
+        color=alt.Color("Count:Q", scale=alt.Scale(scheme="blues"))
+    ).properties(width=400, height=250, title="Confusion Matrix (counts)")
+    text = alt.Chart(cm_long).mark_text(baseline="middle", fontSize=12).encode(
+        x=alt.X("Predicted:N"),
+        y=alt.Y("Actual:N"),
+        text=alt.Text("Count:Q")
+    )
+    st.altair_chart(chart + text, use_container_width=True)
+else:
+    st.write("Confusion matrix (counts):")
+    st.dataframe(cm_df)
 
-# --- Prediction Section ---
-st.sidebar.header("🧍 Input for Prediction")
+# Feature importance (top 10)
+feat_importances = pd.Series(clf.feature_importances_, index=X.columns).sort_values(ascending=False)
+top10 = feat_importances.head(10).reset_index()
+top10.columns = ["feature", "importance"]
 
-def user_input_features():
-    age = st.sidebar.slider("Respondent's Current Age", 15, 49, 28)
-    bmi = st.sidebar.slider("Body Mass Index", 0.0, 50.0, 22.5)
-    age_first_birth = st.sidebar.slider("Age at First Birth", 12, 40, 20)
-    antenatal_visits = st.sidebar.slider("Number of Antenatal Visits", 0, 20, 5)
-    total_children = st.sidebar.slider("Total Children Ever Born", 0, 10, 2)
-    residence = st.sidebar.selectbox("Type of Residence", df["Type_of_place_of_residence"].unique())
-    edu = st.sidebar.selectbox("Highest Education Level", df["Highest_educational_level"].unique())
-    husband_edu = st.sidebar.selectbox("Husband/Partner Education Level", df["Husband_partner_education_level"].unique())
-    wealth = st.sidebar.selectbox("Wealth Index", df["Wealth_index_combined"].unique())
+st.write("### Top 10 Feature Importances")
+if ALT_AVAILABLE:
+    bar = alt.Chart(top10).mark_bar().encode(
+        x=alt.X("importance:Q"),
+        y=alt.Y("feature:N", sort='-x')
+    ).properties(width=600, height=300, title="Top 10 Features")
+    st.altair_chart(bar, use_container_width=True)
+else:
+    st.dataframe(top10)
 
-    data = {
-        "Respondents_current_age": age,
-        "Body_Mass_Index": bmi,
-        "Age_of_respondent_at_1st_birth": age_first_birth,
-        "Number_of_antenatal_visits": antenatal_visits,
-        "Total_children_ever_born": total_children,
-        "Type_of_place_of_residence": residence,
-        "Highest_educational_level": edu,
-        "Husband_partner_education_level": husband_edu,
-        "Wealth_index_combined": wealth
-    }
-    return pd.DataFrame(data, index=[0])
+# --- PREDICTION INTERFACE ---
+st.sidebar.header("Input for Prediction")
 
-input_df = user_input_features()
+# Provide fixed categorical choices (as you requested)
+residence_choice = st.sidebar.selectbox("Type of place of residence", ["Rural", "Urban"])
+education_choice = st.sidebar.selectbox("Highest educational level", ["Primary", "High"])
+husband_edu_choice = st.sidebar.selectbox("Husband/partner's education level", ["Primary", "High"])
+wealth_choice = st.sidebar.selectbox("Wealth index combined", ["Poor", "Middle", "Rich"])
 
-# Prepare input for prediction (same encoding)
-input_encoded = pd.get_dummies(input_df, columns=cat_cols, drop_first=True)
-input_encoded = input_encoded.reindex(columns=X.columns, fill_value=0)
+age_val = st.sidebar.slider("Respondent's current age", 10, 60, int(data[numeric_cols[0]].median() if numeric_cols[0] in data else 28))
+bmi_val = st.sidebar.slider("Body Mass Index (BMI)", 0.0, 60.0, float(round(data["Body Mass Index"].median() if "Body Mass Index" in data else 22.0,1)))
+age1_val = st.sidebar.slider("Age at 1st birth", 10, 50, int(data[numeric_cols[2]].median() if numeric_cols[2] in data else 20))
+antenatal_val = st.sidebar.slider("Number of antenatal visits", 0, 30, int(data[numeric_cols[3]].median() if numeric_cols[3] in data else 4))
+children_val = st.sidebar.slider("Total children ever born", 0, 20, int(data[numeric_cols[4]].median() if numeric_cols[4] in data else 1))
 
-prediction = clf.predict(input_encoded)[0]
-prediction_proba = clf.predict_proba(input_encoded)[0]
+input_dict = {
+    "Respondent's current age": age_val,
+    "Body Mass Index": bmi_val,
+    "Age of respondent at 1st birth": age1_val,
+    "Type of place of residence": residence_choice,
+    "Highest educational level": education_choice,
+    "Husband/partner's education level": husband_edu_choice,
+    "Wealth index combined": wealth_choice,
+    "Number of antenatal visits": antenatal_val,
+    "Total children ever born": children_val
+}
+input_df = pd.DataFrame(input_dict, index=[0])
+st.write("### Input preview")
+st.dataframe(input_df)
 
-st.subheader("🔮 Prediction Result")
-st.write("**Predicted Outcome:**", "🩺 Caesarean Section" if prediction == 1 else "👶 Normal Delivery")
+# Combine and encode input the same way as training
+combined_for_input = pd.concat([input_df, X_unencoded], axis=0, ignore_index=True)
+combined_encoded = pd.get_dummies(combined_for_input, drop_first=True)
+input_encoded = combined_encoded.iloc[[0]].reindex(columns=X.columns, fill_value=0)
 
-st.write("**Prediction Probability:**")
-st.write(f"Normal Delivery: {prediction_proba[0]:.2f}")
-st.write(f"Caesarean Section: {prediction_proba[1]:.2f}")
+# scale using the same scaler
+input_scaled = scaler.transform(input_encoded)
+
+pred = clf.predict(input_scaled)[0]
+pred_proba = clf.predict_proba(input_scaled)[0]
+
+st.write("## Prediction")
+st.write("**Predicted outcome:**", "🩺 Caesarean (1)" if pred == 1 else "👶 Normal (0)")
+st.write("**Probabilities:**")
+cols = ["Prob_Normal", "Prob_Caesarean"]
+proba_df = pd.DataFrame([pred_proba], columns=cols)
+st.dataframe(proba_df.T)
+
+st.caption("If Altair is not installed, plots will be displayed as tables. To enable charts, install Altair (`pip install altair`).")
