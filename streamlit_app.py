@@ -3,11 +3,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, confusion_matrix
-from imblearn.over_sampling import SMOTE
-from imblearn.ensemble import BalancedRandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier, StackingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 # ==========================
 # Streamlit page config
@@ -17,11 +16,20 @@ st.title("🤰 Caesarean Section Prediction App")
 st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0).")
 
 # ==========================
-# Train model (cached) - WITH SMOTE
+# Load dataset
+# ==========================
+@st.cache_data
+def load_data():
+    df = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv")
+    df = df.dropna(subset=["Delivery by caesarean section"])
+    return df
+
+# ==========================
+# Train model (cached) - FIXED VERSION
 # ==========================
 @st.cache_resource
 def train_model():
-    # Load data
+    # Load data inside the cached function
     df = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv")
     df = df.dropna(subset=["Delivery by caesarean section"])
     
@@ -29,102 +37,41 @@ def train_model():
     X = df.drop(columns=[target_col])
     y = df[target_col].astype(int)
     
-    # Check class distribution
-    class_counts = y.value_counts()
-    imbalance_ratio = class_counts.max() / class_counts.min()
-    
-    # Scale features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    
-    # Split data first
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_scaled, y, test_size=0.2, stratify=y, random_state=42
+
+    rf = RandomForestClassifier(n_estimators=200, random_state=42, class_weight="balanced")
+    ada = AdaBoostClassifier(n_estimators=150, random_state=42)
+    gb = GradientBoostingClassifier(n_estimators=150, random_state=42)
+
+    stack_model = StackingClassifier(
+        estimators=[('rf', rf), ('ada', ada), ('gb', gb)],
+        final_estimator=LogisticRegression(class_weight="balanced"),
+        cv=5
     )
+
+    stack_model.fit(X_scaled, y)
     
-    # Apply SMOTE to training data only
-    smote = SMOTE(random_state=42, k_neighbors=3)
-    X_train_balanced, y_train_balanced = smote.fit_resample(X_train, y_train)
+    # Calculate metrics
+    cv_scores = cross_val_score(stack_model, X_scaled, y, cv=5, scoring='accuracy')
+    cv_acc = cv_scores.mean()
     
-    # Train models on balanced data
-    rf = BalancedRandomForestClassifier(
-        n_estimators=500,
-        max_depth=12,
-        min_samples_split=5,
-        min_samples_leaf=2,
-        random_state=42,
-        sampling_strategy='all',
-        replacement=True
-    )
-    
-    gb = GradientBoostingClassifier(
-        n_estimators=500,
-        learning_rate=0.02,
-        max_depth=8,
-        min_samples_split=10,
-        subsample=0.8,
-        random_state=42
-    )
-    
-    # Train on balanced data
-    rf.fit(X_train_balanced, y_train_balanced)
-    gb.fit(X_train_balanced, y_train_balanced)
-    
-    # Aggressive ensemble favoring C-section detection
-    class AggressiveEnsemble:
-        def __init__(self, models, csection_boost=3.5):
-            self.models = models
-            self.csection_boost = csection_boost
-            
-        def predict_proba(self, X):
-            probas = np.array([model.predict_proba(X) for model in self.models])
-            avg_proba = np.mean(probas, axis=0)
-            
-            # Aggressively boost C-section probability
-            avg_proba[:, 1] = avg_proba[:, 1] * self.csection_boost
-            
-            # Renormalize
-            row_sums = avg_proba.sum(axis=1, keepdims=True)
-            avg_proba = avg_proba / row_sums
-            
-            return avg_proba
-        
-        def predict(self, X):
-            proba = self.predict_proba(X)
-            # Lower threshold for C-section prediction
-            return (proba[:, 1] >= 0.35).astype(int)
-    
-    # Create aggressive ensemble with high boost
-    boost_factor = min(4.0, imbalance_ratio / 3)
-    model = AggressiveEnsemble([rf, gb], csection_boost=boost_factor)
-    
-    # Evaluate
-    y_pred = model.predict(X_test)
+    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, stratify=y, random_state=42)
+    y_pred = stack_model.predict(X_test)
     test_acc = accuracy_score(y_test, y_pred)
     cm = confusion_matrix(y_test, y_pred)
     
-    balanced_counts = pd.Series(y_train_balanced).value_counts()
-    
-    return model, scaler, test_acc, cm, class_counts, balanced_counts, imbalance_ratio
+    return stack_model, scaler, cv_acc, test_acc, cm
 
 # Train once and cache
-with st.spinner("Training model with SMOTE balancing... (happens once)"):
-    model, scaler, test_acc, cm, original_counts, balanced_counts, imbalance_ratio = train_model()
+with st.spinner("Loading model... (this happens only once)"):
+    stack_model, scaler, cv_acc, test_acc, cm = train_model()
 
 # ==========================
 # Display model performance
 # ==========================
-col1, col2 = st.columns(2)
-with col1:
-    st.success(f"✅ Test Accuracy: {test_acc:.3f}")
-with col2:
-    st.warning(f"⚖️ Original Imbalance: {imbalance_ratio:.1f}:1")
-
-col3, col4 = st.columns(2)
-with col3:
-    st.info(f"📊 Original - Normal: {original_counts.get(0, 0)} | C-section: {original_counts.get(1, 0)}")
-with col4:
-    st.success(f"✨ After SMOTE - Normal: {balanced_counts.get(0, 0)} | C-section: {balanced_counts.get(1, 0)}")
+st.success(f"📊 CV Accuracy: {cv_acc:.3f}")
+st.success(f"✅ Test Accuracy: {test_acc:.3f}")
 
 st.subheader("Confusion Matrix")
 st.dataframe(pd.DataFrame(cm, columns=['Pred_Normal', 'Pred_Caesarean'], index=['Actual_Normal', 'Actual_Caesarean']))
@@ -182,37 +129,24 @@ input_data = {
 input_df = pd.DataFrame(input_data, index=[0])
 
 # ==========================
-# Prediction
+# Prediction (instant!)
 # ==========================
 input_scaled = scaler.transform(input_df)
-pred = model.predict(input_scaled)[0]
-pred_proba = model.predict_proba(input_scaled)[0]
+pred = stack_model.predict(input_scaled)[0]
+pred_proba = stack_model.predict_proba(input_scaled)[0]
 
 st.subheader("🧠 Prediction Result")
-
-# Show probabilities
-col1, col2 = st.columns(2)
-with col1:
-    st.metric("Normal Delivery", f"{pred_proba[0]:.1%}")
-with col2:
-    st.metric("Caesarean Delivery", f"{pred_proba[1]:.1%}")
-
-# Prediction (lowered threshold to 35%)
 if pred == 1:
-    st.error(f"⚠️ **CAESAREAN DELIVERY LIKELY** (Probability: {pred_proba[1]:.1%})")
+    st.error("⚠️ Caesarean delivery likely (1)")
 else:
-    st.success(f"✅ **Normal delivery likely** (Probability: {pred_proba[0]:.1%})")
+    st.success("✅ Normal delivery likely (0)")
 
-# Risk level based on probability
-if pred_proba[1] > 0.6:
-    st.error("🔴 **HIGH RISK for C-section**")
-elif pred_proba[1] > 0.35:
-    st.warning("🟡 **MODERATE-HIGH RISK for C-section**")
-elif pred_proba[1] > 0.20:
-    st.warning("🟠 **MODERATE RISK for C-section**")
-else:
-    st.info("🟢 Low Risk for C-section")
+st.write("### Prediction Probabilities")
+prob_df = pd.DataFrame([pred_proba], columns=["Normal", "Caesarean"])
+prob_df['Normal'] = prob_df['Normal'].apply(lambda x: f"{x:.1%}")
+prob_df['Caesarean'] = prob_df['Caesarean'].apply(lambda x: f"{x:.1%}")
+st.dataframe(prob_df)
 
-# Debug
-with st.expander("🔍 View Input Values"):
+# Debug: Show input values
+with st.expander("🔍 View Input Values (Debug)"):
     st.dataframe(input_df)
