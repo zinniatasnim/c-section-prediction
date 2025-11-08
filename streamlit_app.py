@@ -17,7 +17,7 @@ st.info("Predict whether a delivery is likely to be **Caesarean** or **Normal**,
 # ------------------------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv("cleaned_for_ml.csv")
+    df = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv")
     return df
 
 df = load_data()
