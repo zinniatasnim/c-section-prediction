@@ -16,6 +16,27 @@ st.title("🤰 Caesarean Section Prediction App")
 st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0).")
 
 # ==========================
+# Feature engineering helper
+# ==========================
+def add_risk_features(df):
+    """Add realistic clinical risk features"""
+    df = df.copy()
+    
+    # Obesity risk: BMI > 30 (clinical obesity threshold)
+    df['obesity_risk'] = (df["Body Mass Index"] > 30).astype(int)
+    
+    # Advanced maternal age: >= 35 years (medical cutoff)
+    df['advanced_maternal_age'] = (df["Respondent's current age"] >= 35).astype(int)
+    
+    # Very young first birth: < 18 years (high-risk threshold)
+    df['teenage_first_birth'] = (df["Age of respondent at 1st birth"] < 18).astype(int)
+    
+    # Compound risk: obesity + advanced age together
+    df['compound_risk'] = ((df["Body Mass Index"] > 30) & (df["Respondent's current age"] >= 35)).astype(int)
+    
+    return df
+
+# ==========================
 # Load dataset
 # ==========================
 @st.cache_data
@@ -25,11 +46,11 @@ def load_data():
     return df
 
 # ==========================
-# Train model (cached) - ENHANCED VERSION
+# Train model (cached)
 # ==========================
 @st.cache_resource
 def train_model():
-    # Load data inside the cached function
+    # Load data
     df = pd.read_csv("https://raw.githubusercontent.com/zinniatasnim/data/refs/heads/main/cleaned_for_ml.csv")
     df = df.dropna(subset=["Delivery by caesarean section"])
     
@@ -37,48 +58,43 @@ def train_model():
     X = df.drop(columns=[target_col])
     y = df[target_col].astype(int)
     
-    # CREATE REALISTIC RISK FEATURES - only flag actual high-risk scenarios
-    # High BMI risk: obesity (BMI > 30), not just overweight
-    X['obesity_risk'] = (X["Body Mass Index"] > 30).astype(int)
+    # Add risk features
+    X = add_risk_features(X)
     
-    # Advanced maternal age: clinical threshold is 35+
-    X['advanced_maternal_age'] = (X["Respondent's current age"] >= 35).astype(int)
+    # Get feature names for later use
+    feature_names = X.columns.tolist()
     
-    # Very young first birth risk: < 18 years
-    X['teenage_first_birth'] = (X["Age of respondent at 1st birth"] < 18).astype(int)
-    
-    # Combined high-risk: obesity + advanced age
-    X['compound_risk'] = ((X["Body Mass Index"] > 30) & (X["Respondent's current age"] >= 35)).astype(int)
-    
+    # Scale features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # Enhanced model parameters to capture these features better
+    # Balanced model parameters
     rf = RandomForestClassifier(
-        n_estimators=200, 
-        max_depth=15, 
-        min_samples_split=5,
-        max_features='sqrt',
+        n_estimators=150, 
+        max_depth=10, 
+        min_samples_split=10,
+        min_samples_leaf=5,
         random_state=42, 
         class_weight="balanced"
     )
     
     ada = AdaBoostClassifier(
-        n_estimators=150, 
-        learning_rate=0.5, 
+        n_estimators=100, 
+        learning_rate=0.8, 
         random_state=42
     )
     
     gb = GradientBoostingClassifier(
-        n_estimators=150, 
-        max_depth=5, 
-        learning_rate=0.1, 
+        n_estimators=100, 
+        max_depth=4, 
+        learning_rate=0.05,
+        min_samples_split=10,
         random_state=42
     )
 
     stack_model = StackingClassifier(
         estimators=[('rf', rf), ('ada', ada), ('gb', gb)],
-        final_estimator=LogisticRegression(class_weight="balanced", max_iter=1000),
+        final_estimator=LogisticRegression(class_weight="balanced", max_iter=1000, C=0.5),
         cv=5
     )
 
@@ -93,11 +109,11 @@ def train_model():
     test_acc = accuracy_score(y_test, y_pred)
     cm = confusion_matrix(y_test, y_pred)
     
-    return stack_model, scaler, cv_acc, test_acc, cm
+    return stack_model, scaler, feature_names, cv_acc, test_acc, cm
 
 # Train once and cache
 with st.spinner("Loading model... (this happens only once)"):
-    stack_model, scaler, cv_acc, test_acc, cm = train_model()
+    stack_model, scaler, feature_names, cv_acc, test_acc, cm = train_model()
 
 # ==========================
 # Display model performance
@@ -138,6 +154,7 @@ wealth_3 = 1 if wealth_index == "Middle" else 0
 wealth_4 = 1 if wealth_index == "Richer" else 0
 wealth_5 = 1 if wealth_index == "Richest" else 0
 
+# Create input dataframe with EXACT same structure as training
 input_data = {
     "Respondent's current age": age,
     "Body Mass Index": bmi,
@@ -155,20 +172,19 @@ input_data = {
     "Wealth index combined_2": wealth_2,
     "Wealth index combined_3": wealth_3,
     "Wealth index combined_4": wealth_4,
-    "Wealth index combined_5": wealth_5,
-    # Add the same interaction features as training
-    "age_bmi_interaction": age * bmi,
-    "age_firstbirth_gap": age - age_first_birth,
-    "bmi_age_ratio": bmi / (age + 1),
-    "high_bmi_flag": 1 if bmi > 25 else 0,
-    "advanced_age_flag": 1 if age > 35 else 0,
-    "young_first_birth": 1 if age_first_birth < 20 else 0
+    "Wealth index combined_5": wealth_5
 }
 
 input_df = pd.DataFrame(input_data, index=[0])
 
+# Add the same risk features as training
+input_df = add_risk_features(input_df)
+
+# Ensure columns are in the same order as training
+input_df = input_df[feature_names]
+
 # ==========================
-# Prediction (instant!)
+# Prediction
 # ==========================
 input_scaled = scaler.transform(input_df)
 pred = stack_model.predict(input_scaled)[0]
@@ -185,6 +201,24 @@ prob_df = pd.DataFrame([pred_proba], columns=["Normal", "Caesarean"])
 prob_df['Normal'] = prob_df['Normal'].apply(lambda x: f"{x:.1%}")
 prob_df['Caesarean'] = prob_df['Caesarean'].apply(lambda x: f"{x:.1%}")
 st.dataframe(prob_df)
+
+# Show risk factors identified
+st.write("### Risk Factors Identified")
+risk_factors = []
+if bmi > 30:
+    risk_factors.append(f"⚠️ Obesity (BMI: {bmi:.1f})")
+if age >= 35:
+    risk_factors.append(f"⚠️ Advanced maternal age ({age} years)")
+if age_first_birth < 18:
+    risk_factors.append(f"⚠️ Teenage first birth (age {age_first_birth})")
+if bmi > 30 and age >= 35:
+    risk_factors.append("⚠️ Compound risk: Obesity + Advanced age")
+
+if risk_factors:
+    for rf in risk_factors:
+        st.warning(rf)
+else:
+    st.info("✅ No major risk factors identified")
 
 # Debug: Show input values
 with st.expander("🔍 View Input Values (Debug)"):
