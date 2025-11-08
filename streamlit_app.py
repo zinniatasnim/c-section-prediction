@@ -84,16 +84,25 @@ def user_input_features():
     antenatal = st.sidebar.slider("Number of antenatal visits", 0, 30, 5)
     total_children = st.sidebar.slider("Total children ever born", 0, 15, 2)
     residence_urban = st.sidebar.selectbox("Type of residence", ["Rural", "Urban"])
-    edu_1 = st.sidebar.checkbox("Education Level 1 (Primary)")
-    edu_2 = st.sidebar.checkbox("Education Level 2 (Secondary)")
-    edu_3 = st.sidebar.checkbox("Education Level 3 (Higher)")
-    husband_edu_1 = st.sidebar.checkbox("Husband Education 1 (Primary)")
-    husband_edu_2 = st.sidebar.checkbox("Husband Education 2 (Secondary)")
-    husband_edu_3 = st.sidebar.checkbox("Husband Education 3 (Higher)")
-    wealth_2 = st.sidebar.checkbox("Wealth Level 2 (Poorer)")
-    wealth_3 = st.sidebar.checkbox("Wealth Level 3 (Middle)")
-    wealth_4 = st.sidebar.checkbox("Wealth Level 4 (Richer)")
-    wealth_5 = st.sidebar.checkbox("Wealth Level 5 (Richest)")
+    
+    # Dropdowns instead of checkboxes
+    edu_level = st.sidebar.selectbox("Highest Educational Level", ["No education","Primary","Secondary","Higher"])
+    husband_edu = st.sidebar.selectbox("Husband/Partner's Education Level", ["No education","Primary","Secondary","Higher"])
+    wealth_index = st.sidebar.selectbox("Wealth Index Combined", ["Poorest","Poorer","Middle","Richer","Richest"])
+    
+    # Convert dropdowns to one-hot encoded values
+    edu_1 = 1 if edu_level == "Primary" else 0
+    edu_2 = 1 if edu_level == "Secondary" else 0
+    edu_3 = 1 if edu_level == "Higher" else 0
+
+    husband_edu_1 = 1 if husband_edu == "Primary" else 0
+    husband_edu_2 = 1 if husband_edu == "Secondary" else 0
+    husband_edu_3 = 1 if husband_edu == "Higher" else 0
+
+    wealth_2 = 1 if wealth_index == "Poorer" else 0
+    wealth_3 = 1 if wealth_index == "Middle" else 0
+    wealth_4 = 1 if wealth_index == "Richer" else 0
+    wealth_5 = 1 if wealth_index == "Richest" else 0
 
     data = {
         "Respondent's current age": age,
@@ -102,17 +111,17 @@ def user_input_features():
         "Number of antenatal visits": antenatal,
         "Total children ever born": total_children,
         "Type of place of residence_2": 1 if residence_urban == "Urban" else 0,
-        "Highest educational level_1": int(edu_1),
-        "Highest educational level_2": int(edu_2),
-        "Highest educational level_3": int(edu_3),
-        "Husband/partner's education level_1.0": int(husband_edu_1),
-        "Husband/partner's education level_2.0": int(husband_edu_2),
-        "Husband/partner's education level_3.0": int(husband_edu_3),
+        "Highest educational level_1": edu_1,
+        "Highest educational level_2": edu_2,
+        "Highest educational level_3": edu_3,
+        "Husband/partner's education level_1.0": husband_edu_1,
+        "Husband/partner's education level_2.0": husband_edu_2,
+        "Husband/partner's education level_3.0": husband_edu_3,
         "Husband/partner's education level_8.0": 0,
-        "Wealth index combined_2": int(wealth_2),
-        "Wealth index combined_3": int(wealth_3),
-        "Wealth index combined_4": int(wealth_4),
-        "Wealth index combined_5": int(wealth_5)
+        "Wealth index combined_2": wealth_2,
+        "Wealth index combined_3": wealth_3,
+        "Wealth index combined_4": wealth_4,
+        "Wealth index combined_5": wealth_5
     }
 
     return pd.DataFrame(data, index=[0])
