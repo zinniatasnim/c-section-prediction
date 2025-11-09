@@ -12,7 +12,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 # Streamlit page config
 # ==========================
 st.set_page_config(page_title="C-section Prediction", layout="centered")
-st.title("🤰 Caesarean Section Prediction App")
+st.title("🤰 Caesarean Section Predictor")
 st.info("Predicts whether a delivery will be Caesarean (1) or Normal (0).")
 
 # ==========================
